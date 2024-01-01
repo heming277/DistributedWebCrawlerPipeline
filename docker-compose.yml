@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    ports:
+      - "5001:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import requests; r = requests.get(\"http://127.0.0.1:5000/health\"); assert r.status_code == 200'"]
+      interval: 30s
+      timeout: 10s
+      retries: 50
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    volumes:
+      - shared-tmp:/tmp
+    environment:
+      - NAME=World
+
+  webcrawler:
+    build:
+      context: .
+      dockerfile: docker/webcrawler.Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      data_pipeline:
+        condition: service_started
+
+  data_pipeline:
+    build:
+      context: .
+      dockerfile: docker/data_pipeline.Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    volumes:
+      - shared-tmp:/tmp
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "80:80"
+    volumes:
+      - ./default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      api:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  rabbitmq:
+    image: "rabbitmq:management"
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 50
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  elasticsearch:
+    image: "elasticsearch:8.11.3"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 50
+    environment:
+      - "discovery.type=single-node"
+      - "xpack.security.enabled=false"  
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+
+volumes:
+  shared-tmp:
+  esdata:
